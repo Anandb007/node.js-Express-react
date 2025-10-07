@@ -1,0 +1,44 @@
+1. Authenticate Docker to AWS ECR
+
+]aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 486408064722.dkr.ecr.us-east-1.amazonaws.com
+Description:
+    Retrieves a login password for the ECR registry in the us-east-1 region.
+    Pipes the password to the Docker login command.
+    Authenticates Docker client to the AWS ECR registry located at:
+      
+    486408064722.dkr.ecr.us-east-1.amazonaws.com
+    Uses the username AWS (default for ECR login).
+Purpose:
+    Allows Docker to interact with your AWS ECR repositories for pushing and pulling images.
+
+2. Tag Local Docker Images for ECR
+docker tag shop-backend:latest 486408064722.dkr.ecr.us-east-1.amazonaws.com/shop-backend:latest
+docker tag shop-frontend:latest 486408064722.dkr.ecr.us-east-1.amazonaws.com/shop-frontend:latest
+
+Description:
+    Tags the local Docker image shop-backend:latest with the full ECR repository URI.
+    Tags the local Docker image shop-frontend:latest similarly.
+    Format of tag:
+        <aws_account_id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
+
+Purpose:
+    Prepares the images to be pushed to the correct ECR repositories by associating them with the appropriate ECR repository URI.
+
+3. Push Docker Images to AWS ECR
+docker push 486408064722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application:shop-backend
+docker push 486408064722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application:shop-frontend
+
+Description:
+Pushes the tagged images to the specified repositories in AWS ECR.
+Note: There appears to be a mismatch between the repository names used in the tag and push commands.
+    Images were tagged for shop-backend and shop-frontend repositories.
+    Images are pushed to frontend-backend-application repository with tags shop-backend and shop-frontend.
+
+Purpose:
+    Uploads the Docker images to ECR, making them available for deployment or further use in AWS services like EKS.
+
+Summary
+Step	                      Command                                        Purpose	Notes
+1. Authenticate	            Log Docker into AWS ECR	                       Allows push and pull to ECR
+2. Tag Images	              Tag local images with ECR repository path	     Prepares images for pushing
+3. Push Images	            Push images to AWS ECR repositories	           Ensure tag and push repository names match
