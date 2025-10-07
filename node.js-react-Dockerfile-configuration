@@ -1,0 +1,86 @@
+node.js-backend/src
+##########################################
+cat index.js
+const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+
+const app = express();
+app.use(express.json());
+
+// Allow requests from the React frontend (port 3000)
+app.use(cors({
+  origin: 'http://44.223.53.100:3000' // Change to your server's IP address and React port
+}));
+
+app.get('/', (req, res) => {
+  res.json({ message: 'Backend running!', data: 'Hello from Express!' });
+});
+
+app.listen(8080, () => console.log('Server running on port 8080'));
+
+############
+Dockerfile:
+############
+FROM node:18-alpine
+WORKDIR /app
+# Copy both package.json and package-lock.json
+COPY package.json package-lock.json ./
+RUN npm ci --only=production
+COPY src ./src
+EXPOSE 8080
+CMD ["node", "src/index.js"]
+
+-------------------------------------------------------------------------------------------------------------
+
+Frontend:
+
+cat App.js
+
+import React, { useEffect, useState } from 'react';
+import './App.css';
+function App() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    // Fetch data from the backend API
+    fetch('http://44.223.53.100:8080') // Backend running on this IP and port
+      .then((response) => response.json())
+      .then((data) => setData(data))
+      .catch((error) => console.error('Error fetching data:', error));
+  }, []);
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>React Frontend</h1>
+        <h2>Backend Data:</h2>
+        <pre>{JSON.stringify(data, null, 2)}</pre>
+      </header>
+    </div>
+  );
+}
+export default App;
+###############
+Dockerfile
+###############
+FROM node:18-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY src ./src
+COPY public ./public
+RUN npm run build
+
+FROM node:18-alpine
+WORKDIR /app
+RUN npm i -g serve
+COPY --from=build /app/build /app/build
+EXPOSE 3000
+CMD ["serve", "-s", "build", "-l", "3000"]
+
+---------------------------------------------------------------------------------------------------------
+Issues faced while building the image:
+  Copying the package-lock.json file for both frontend and backend.
+
+Mapping the backend to the frontend.
+  Open src/App.js and modify it to make a request to the backend when the page loads.
+    
