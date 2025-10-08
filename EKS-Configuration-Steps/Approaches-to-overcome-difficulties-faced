@@ -1,0 +1,122 @@
+Amazon EBS CSI Driver on EKS — Troubleshooting & Solutions Documentation
+
+Overview
+
+This document covers common errors encountered while setting up the Amazon EBS Container Storage Interface (CSI) driver on an Amazon EKS cluster and provides detailed resolutions.
+
+Environment Details
+Item	                      Value
+AWS Account ID	            486408064722
+Region	                    us-east-1
+EKS Cluster Name	          node-react-application
+EBS CSI Driver Version	    1.49.0
+Kubernetes Namespace	      kube-system
+
+---------------------------------------------
+Error 1: kubectl: command not found
+
+Description
+    When running the command:
+    kubectl get nodes
+    the system returned:
+    -bash: kubectl: command not found
+
+Root Cause
+    kubectl CLI tool was not installed or not in the system's PATH.
+
+Resolution
+    Install kubectl following AWS docs
+    or your OS package manager.
+     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+     chmod +x kubectl
+     sudo mv kubectl /usr/local/bin/
+   Verify installation by running:
+     kubectl version --client
+
+---------------------------------------------------------------
+Error 2: EBS CSI Controller Pods CrashLoopBackOff
+
+Symptoms
+    Listing pods in the kube-system namespace:
+    kubectl get pods -n kube-system -l app=ebs-csi-controller
+    showed:
+        ebs-csi-controller-6c6c64c9f5-f4kcg   1/6   CrashLoopBackOff   61 (14s ago)   44m
+
+Logs and Describe Output
+The pod’s container logs and kubectl describe pod revealed:
+
+    Failed health check (verify network connection and IAM credentials): dry-run EC2 API call failed: 
+    operation error EC2: DescribeAvailabilityZones, get identity: get credentials: failed to refresh cached credentials, 
+    no EC2 IMDS role found, operation error ec2imds: GetMetadata, canceled, context deadline exceeded
+
+Root Cause
+    The EBS CSI driver pod failed to obtain AWS credentials because it could not find a valid IAM role attached to the EC2 instance or configured via IRSA (IAM Roles for Service Accounts).
+    This causes failure in EC2 API calls required for volume provisioning.
+
+Solution: Configure IAM Role for Service Account (IRSA)
+Step 1: Get OIDC Provider URL for the EKS Cluster
+    Navigate to the EKS Console → your cluster → Configuration → Authentication.
+    Copy the OIDC provider URL and extract the OIDC Provider ID (the part after /id/).
+
+Step 2: Create IAM Role for the EBS CSI Driver
+    Go to IAM Console → Roles → Create role.
+    Select Web identity as the trusted entity.
+    Choose the EKS OIDC provider from the list.
+    Set audience to sts.amazonaws.com.
+    Attach the AWS-managed policy AmazonEBSCSIDriverPolicy.
+    Name the role (e.g., AmazonEBSCSIDriverRole).
+
+Step 3: Edit the Trust Policy (optional)
+
+Modify the trust relationship to allow the service account to assume the role:
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::486408064722:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/<OIDC_ID>"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-east-1.amazonaws.com/id/<OIDC_ID>:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+        }
+      }
+    }
+  ]
+}
+
+
+Replace <OIDC_ID> with your actual OIDC Provider ID.
+
+Step 4: Annotate the Kubernetes Service Account
+
+    Link the IAM role to the Kubernetes service account:
+    kubectl annotate serviceaccount \
+      -n kube-system ebs-csi-controller-sa \
+      eks.amazonaws.com/role-arn=arn:aws:iam::486408064722:role/AmazonEBSCSIDriverRole \
+      --overwrite
+
+Step 5: Restart the EBS CSI Controller Pods
+      kubectl delete pod -n kube-system -l app=ebs-csi-controller
+    Pods will restart and assume the IAM role via IRSA, allowing them to successfully call AWS APIs.
+Validation
+    Check pod status:
+      kubectl get pods -n kube-system -l app=ebs-csi-controller
+    Pods should be in Running state with no restarts.
+    Confirm logs do not show credential errors:
+      kubectl logs -n kube-system <pod-name> -c ebs-plugin
+Additional Notes
+    Why IRSA?
+    IRSA is a best practice to provide fine-grained AWS permissions to pods without using node instance roles, improving security.
+    Cannot annotate service accounts via AWS Console UI:
+    This step must be done using kubectl or Kubernetes management tools.
+    AmazonEBSCSIDriverPolicy includes permissions necessary for managing EBS volumes (attach, detach, create, delete, etc.).
+
+Summary Table
+Error	Cause	Solution
+kubectl: command not found	kubectl CLI not installed	Install kubectl
+CrashLoopBackOff with no EC2 IMDS role found error	No IAM role for CSI driver pods	Create IAM role for service account (IRSA) and annotate SA
+Cannot access AWS APIs	Missing IAM permissions	Attach AmazonEBSCSIDriverPolicy to IAM role
