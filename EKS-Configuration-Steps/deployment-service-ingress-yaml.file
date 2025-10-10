@@ -1,46 +1,45 @@
 Project Deployment Documentation
 -------------------------------------------------------------------------------------------------------------------------
 1. Project Overview
-
     have a Node.js backend and a React frontend application:
-      Backend runs on port 8080 (Express + MySQL).
-      Frontend runs on port 3000 (React served via serve).
-      Both applications are containerized and stored on AWS ECR.
-      Both applications are deployed on Kubernetes.
+          Backend runs on port 8080 (Express + MySQL).
+          Frontend runs on port 3000 (React served via serve).
+          Both applications are containerized and stored on AWS ECR.
+          Both applications are deployed on Kubernetes.
     A single Ingress routes external traffic to frontend (/) and backend (/api).
-
+_____________________________________________________________________
 2. Dockerfiles Summary
+    Backend Dockerfile (node.js-backend/Dockerfile)
+        FROM node:18-alpine
+        WORKDIR /app
+        COPY package.json package-lock.json ./
+        RUN npm ci --only=production
+        COPY src ./src
+        EXPOSE 8080
+        CMD ["node", "src/index.js"]
 
-Backend Dockerfile (node.js-backend/Dockerfile)
-    FROM node:18-alpine
-    WORKDIR /app
-    COPY package.json package-lock.json ./
-    RUN npm ci --only=production
-    COPY src ./src
-    EXPOSE 8080
-    CMD ["node", "src/index.js"]
-
-Frontend Dockerfile (frontend/Dockerfile)
-    FROM node:18-alpine AS build
-    WORKDIR /app
-    COPY package.json package-lock.json ./
-    RUN npm ci
-    COPY src ./src
-    COPY public ./public
-    RUN npm run build
-
-    FROM node:18-alpine
-    WORKDIR /app
-    RUN npm i -g serve
-    COPY --from=build /app/build /app/build
-    EXPOSE 3000
-    CMD ["serve", "-s", "build", "-l", "3000"]
-
+    Frontend Dockerfile (frontend/Dockerfile)
+        FROM node:18-alpine AS build
+        WORKDIR /app
+        COPY package.json package-lock.json ./
+        RUN npm ci
+        COPY src ./src
+        COPY public ./public
+        RUN npm run build
+    
+        FROM node:18-alpine
+        WORKDIR /app
+        RUN npm i -g serve
+        COPY --from=build /app/build /app/build
+        EXPOSE 3000
+        CMD ["serve", "-s", "build", "-l", "3000"]
+_____________________________________________________________________
 3. Kubernetes Deployment Architecture
-    Component	Image (AWS ECR)	Port(s)	Kubernetes Service Type	Accessible At
-    Backend	shop-backend	8080	ClusterIP	/api via Ingress
-    Frontend	shop-frontend	3000	ClusterIP	/ via Ingress
-    Ingress Controller	NGINX Controller	80 (HTTP)	LoadBalancer	Public IP or domain
+    Component	            Image (AWS ECR)	        Port(s)        Kubernetes Service Type	Accessible At
+    Backend	                shop-backend	        8080	       ClusterIP	/api via Ingress
+    Frontend	            shop-frontend	        3000	       ClusterIP	/ via Ingress
+    Ingress Controller	    NGINX Controller	    80 (HTTP)	   LoadBalancer	Public IP or domain
+____________________________________________________________________
 4. Kubernetes YAML Manifests
     4.1 Backend Deployment + Service
           apiVersion: apps/v1                               # We're creating a Deployment resource from the 'apps/v1' API
@@ -147,9 +146,8 @@ Frontend Dockerfile (frontend/Dockerfile)
                         name: frontend-service
                         port:
                           number: 80
-
+____________________________________________________________________________
 5. AWS ECR Setup
-
     The images are hosted in AWS ECR under:
         Frontend:
         48644722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application:shop-frontend
@@ -164,7 +162,7 @@ Frontend Dockerfile (frontend/Dockerfile)
           --docker-username=AWS \
           --docker-password=$(aws ecr get-login-password --region us-east-1) \
           --namespace shop-app
-
+____________________________________________________________________________
 6. Ingress Controller Setup
     Using Helm (recommended)
         helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
@@ -179,7 +177,7 @@ Frontend Dockerfile (frontend/Dockerfile)
     
     Wait for the Ingress Controller's LoadBalancer to get an external IP:    
         kubectl get svc -n ingress-nginx
-
+__________________________________________________________________________
 7. Deployment Commands
     Assuming your YAML files are saved as backend.yaml, frontend.yaml, and ingress.yaml:
         kubectl create namespace shop-app
@@ -202,7 +200,7 @@ Frontend Dockerfile (frontend/Dockerfile)
     
     # Deploy ingress rules
         kubectl apply -f ingress.yaml
-
+___________________________________________________________________________
 8. Accessing the Application
     Use the EXTERNAL-IP from the ingress-nginx LoadBalancer service.
     Example URL (using nip.io wildcard):
@@ -210,7 +208,7 @@ Frontend Dockerfile (frontend/Dockerfile)
     Routes:
       Frontend React app: /
       Backend API: /api
-  
+___________________________________________________________________________
 9. Pod Naming Convention
     Pods are created by Deployments; their names are auto-generated.
     The pod name format:  
@@ -219,7 +217,7 @@ Frontend Dockerfile (frontend/Dockerfile)
       backend-deployment-6b947bfcf5-9zvbd
       frontend-deployment-8484f7ccbd-8slc6
     Pods get new names on rolling updates or restarts.
-
+___________________________________________________________________________
 10. Additional Notes
     Update your React frontend to call the backend API via relative path /api (not hardcoded IP), e.g.:
     fetch('/api')
