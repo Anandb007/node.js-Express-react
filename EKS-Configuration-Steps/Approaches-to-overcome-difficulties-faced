@@ -5,12 +5,12 @@ Overview
 This document covers common errors encountered while setting up the Amazon EBS Container Storage Interface (CSI) driver on an Amazon EKS cluster and provides detailed resolutions.
 
 Environment Details
-Item	                      Value
-AWS Account ID	            486408064722
-Region	                    us-east-1
-EKS Cluster Name	          node-react-application
-EBS CSI Driver Version	    1.49.0
-Kubernetes Namespace	      kube-system
+Item                        Value
+AWS Account ID              486408064722
+Region                      us-east-1
+EKS Cluster Name            node-react-application
+EBS CSI Driver Version      1.49.0
+Kubernetes Namespace        kube-system
 
 ---------------------------------------------
 Error 1: kubectl: command not found
