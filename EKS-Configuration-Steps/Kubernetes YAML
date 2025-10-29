@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: dev
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+          envFrom:
+            - configMapRef:
+                name: frontend-config
+---------------------------------------------------------------
+Full Breakdown
+🔹 1. apiVersion: apps/v1
+•	This specifies which version of the Kubernetes API you are using to create this object.
+•	Different types of resources use different API versions.
+o	For Deployments, it is apps/v1.
+o	For Pods or Services, it might be v1.
+👉 Why it matters:
+Kubernetes evolves over time. Specifying the correct API version ensures that Kubernetes interprets the configuration correctly.
+________________________________________
+🔹 2. kind: Deployment
+•	This tells Kubernetes what kind of resource this YAML defines.
+•	Deployment is a controller that manages Pods for you — it keeps them running, updates them, and can roll back if something goes wrong.
+👉 Why it matters:
+If you changed this to Pod, Kubernetes would create only a single unmanaged Pod (no scaling or updates).
+________________________________________
+🔹 3. metadata:
+•	Metadata contains information about the resource — mainly used for identification.
+Inside metadata:
+  name: frontend-deployment
+•	The name of this Deployment is frontend-deployment.
+•	It must be unique within the namespace.
+👉 Why it matters:
+You’ll use this name when running commands like:
+kubectl get deployment frontend-deployment
+________________________________________
+🔹 4. spec:
+•	The specification — defines the desired state of the resource.
+Everything under spec: tells Kubernetes how this Deployment should behave.
+Let’s break it down further 👇
+________________________________________
+🔹 5. replicas: 2
+•	Defines how many Pod replicas (copies) you want Kubernetes to maintain.
+•	Here, it’s set to 2, meaning Kubernetes will always ensure 2 identical Pods are running.
+👉 Why it matters:
+If one Pod crashes, the Deployment controller automatically creates a new one to maintain 2 Pods.
+________________________________________
+🔹 6. selector:
+•	This tells the Deployment which Pods it should manage.
+•	It matches Pods using their labels.
+  selector:
+    matchLabels:
+      app: frontend
+•	This means: “Manage all Pods that have the label app=frontend.”
+👉 Important:
+The labels inside matchLabels must match exactly the labels inside your Pod template (below). Otherwise, the Deployment won’t know which Pods belong to it.
+________________________________________
+🔹 7. template:
+•	This section defines the Pod template — i.e., what each Pod in this Deployment should look like.
+When Kubernetes creates Pods for this Deployment, it uses this template.
+________________________________________
+🔹 8. template.metadata.labels:
+    metadata:
+      labels:
+        app: frontend
+•	Assigns the label app=frontend to each Pod created by this Deployment.
+👉 Why it matters:
+•	This label connects to:
+o	The Deployment’s selector (so it knows which Pods belong to it)
+o	And possibly a Service’s selector (so a Service can route traffic to these Pods)
+________________________________________
+🔹 9. template.spec:
+•	Defines what goes inside the Pod — the containers, images, ports, and so on.
+________________________________________
+🔹 10. containers:
+•	A Pod can contain one or more containers.
+Each container runs an application (like nginx, redis, etc.).
+In this case, you have one container defined:
+containers:
+  - name: frontend
+    image: nginx:latest
+    ports:
+      - containerPort: 80
+________________________________________
+🔹 11. containers:
+•	envFrom.configMapRef — loads all key-value pairs from the ConfigMap as environment variables.
