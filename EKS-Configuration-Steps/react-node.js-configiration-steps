@@ -1,0 +1,441 @@
+1. Environment Setup
+1.1 EC2 Infrastructure
+•	Two EC2 instances (Ubuntu 24.04 LTS):
+o	master-node → Control plane
+o	worker-node → Worker
+•	Installed dependencies:
+•	sudo apt update
+•	sudo apt install -y docker.io apt-transport-https curl
+•	sudo systemctl enable docker --now
+________________________________________
+🧩 2. Kubernetes Cluster Setup
+2.1 Install kubeadm, kubelet, kubectl
+sudo apt install -y apt-transport-https ca-certificates curl gpg
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.34/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt update
+sudo apt install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+2.2 Initialize Cluster (on master)
+sudo kubeadm init --pod-network-cidr=192.168.0.0/16
+Then configure kubectl:
+mkdir -p $HOME/.kube
+sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+2.3 Join Worker Node
+Copy the join command printed from kubeadm init and run it on the worker node:
+sudo kubeadm join <MASTER-IP>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
+________________________________________
+🌐 3. Networking with Calico
+Install Calico for pod-to-pod and cross-node networking:
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.2/manifests/calico.yaml
+Check status:
+kubectl get pods -n kube-system
+________________________________________
+🧱 4. Application Setup
+4.1 Project Structure
+myapp/
+ ├── backend/
+ │   ├── index.js
+ │   ├── package.json
+ │   └── Dockerfile
+ └── frontend/
+     ├── Dockerfile
+     ├── build/
+     └── package.json
+________________________________________
+💻 5. Backend Setup (Node.js + Express)
+5.1 index.js
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const app = express();
+
+app.use(cors());
+app.use(express.static(path.join(__dirname, 'build')));
+
+app.get('/api/hello', (req, res) => {
+  res.json({ message: 'Hello from backend!' });
+});
+
+// FIXED: Correct wildcard route syntax
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
+
+const PORT = 8080;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+5.2 Dockerfile
+FROM node:18
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 8080
+CMD ["node", "index.js"]
+________________________________________
+🎨 6. Frontend Setup (React)
+6.1 Dockerfile
+FROM node:18 AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/build /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+________________________________________
+🐳 7. Push Images to Amazon ECR
+7.1 Authenticate
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+⚠️ Issue Faced:
+UnrecognizedClientException: The security token included in the request is invalid.
+✅ Fix: Reconfigure credentials using aws configure and ensure correct IAM permissions for ECR.
+7.2 Build & Push
+docker build -t myapp-backend ./backend
+docker tag myapp-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp-backend:latest
+docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp-backend:latest
+
+docker build -t myapp-frontend ./frontend
+docker tag myapp-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp-frontend:latest
+docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp-frontend:latest
+________________________________________
+☸️ 8. Kubernetes Deployments & Services
+8.1 Backend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp-backend
+  template:
+    metadata:
+      labels:
+        app: myapp-backend
+    spec:
+      containers:
+      - name: backend
+        image: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp-backend:latest
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-backend-service
+spec:
+  selector:
+    app: myapp-backend
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+8.2 Frontend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp-frontend
+  template:
+    metadata:
+      labels:
+        app: myapp-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/myapp-frontend:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-frontend-service
+spec:
+  selector:
+    app: myapp-frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+  type: NodePort
+________________________________________
+🌍 9. Ingress Controller Setup
+9.1 Install NGINX Ingress
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+Issue Faced:
+EXTERNAL-IP: <pending> — because EC2 environment doesn’t support LoadBalancer type.
+✅ Fix:
+Edit the service to use NodePort:
+kubectl edit svc ingress-nginx-controller -n ingress-nginx
+Change:
+type: LoadBalancer
+to:
+type: NodePort
+Check:
+kubectl get svc -n ingress-nginx
+________________________________________
+🚏 10. Ingress Resource Configuration
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: myapp.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: myapp-frontend-service
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: myapp-backend-service
+            port:
+              number: 8080
+Apply:
+kubectl apply -f ingress.yaml
+________________________________________
+🌐 11. Accessing the Application
+1.	Find your EC2 public IP:
+2.	curl ifconfig.me
+Example: 98.80.14.202
+3.	Access in browser:
+4.	http://98.80.14.202:32160  (NodePort of Ingress)
+or set up /etc/hosts:
+98.80.14.202 myapp.local
+Then visit → http://myapp.local
+________________________________________
+🧠 Common Issues & Fixes
+Issue	Cause	Fix
+Missing parameter name at index 2: /*	Express 5 changed route parsing syntax	Use app.get('*', ...) instead of app.get('/*', ...)
+ECR token invalid	Expired/invalid IAM credentials	Run aws configure again
+Ingress <pending>	EC2 has no LoadBalancer	Change service type to NodePort
+Can’t access app externally	Security group or firewall blocked ports	Allow inbound 80, 30080, 32160 on EC2
+________________________________________
+✅ Final Verification
+kubectl get pods -A -o wide
+kubectl get svc -A -o wide
+kubectl get ingress
+
+
+
+
+---------------------------------------------------------------------
+ingress-controler:
+
+Cluster & Service Setup
+
+What you did:
+
+Deployed two applications: a backend (container listening on port 8080) and a frontend (container listening on port 80).
+
+Created Kubernetes Service objects for each. For example your frontend service YAML:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-frontend-service
+spec:
+  selector:
+    app: myapp-frontend
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080
+
+
+(And similarly for the backend.)
+Why you did it:
+
+A Service maps a stable network endpoint to your Pod(s) so the traffic can reach the containers.
+
+Using type: NodePort allows external access via any node’s IP + the given nodePort.
+What to watch:
+
+nodePort must be within the acceptable NodePort range (default 30000–32767).
+
+Security groups / firewall rules must allow inbound traffic on that port for external access.
+
+2. Installed the Ingress Controller (NGINX)
+
+What you did:
+
+Added Helm repo:
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+
+Installed the ingress-nginx Helm chart in namespace ingress-nginx, with values to expose as NodePort:
+
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --set controller.service.type=NodePort \
+  --set controller.service.nodePorts.http=30080 \
+  --set controller.service.nodePorts.https=30443
+
+
+Why you did it:
+
+The Ingress Controller acts as a reverse‑proxy / router that can accept external HTTP/HTTPS traffic and forward it to your internal Services based on rules (paths, hosts).
+
+Using NodePort for the controller’s Service allows accessibility via node IP and port (since this is a self‑managed EC2 cluster, not EKS with cloud load‑balancer integration).
+What you observed:
+
+The controller Pod was running (Ready 1/1, Running).
+
+The controller Service showed TYPE=NodePort and ports 80:30080/TCP,443:30443/TCP.
+
+Accessing http://<NodeIP>:30080/ produced the default nginx “404 Not Found” page — which is a good sign (controller is reachable) but means no Ingress rules yet.
+
+3. Created the Ingress Resource
+
+What you did:
+
+Created a YAML file (e.g., myapp-ingress.yaml):
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-frontend-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-backend-service
+                port:
+                  number: 8080
+
+
+Applied it: kubectl apply -f myapp-ingress.yaml
+
+-----------------------------------------------------------------------------------------------
+Overview
+This document describes the issues encountered while deploying a Kubernetes Ingress for myapp, the root cause analysis, and the steps taken to resolve them.
+________________________________________
+2. Cluster Context
+•	Kubernetes Version: <Insert version>
+•	Namespace: ingress-nginx
+•	Ingress Controller: NGINX Ingress Controller
+•	Relevant Services:
+o	myapp-frontend-service (port 80)
+o	myapp-backend-service (port 8080)
+________________________________________
+3. Initial Ingress YAML
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-frontend-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-backend-service
+                port:
+                  number: 8080
+________________________________________
+4. Issue Encountered
+•	Command Used:
+•	kubectl apply -f myapp-ingress.yaml
+•	Error Message:
+•	Warning: annotation "kubernetes.io/ingress.class" is deprecated, please use 'spec.ingressClassName' instead
+•	Error from server (InternalError): error when creating "myapp-ingress.yaml": Internal error occurred: failed calling webhook "validate.nginx.ingress.kubernetes.io": context deadline exceeded
+•	Observed Behavior:
+o	NGINX Ingress Controller pod was restarted.
+o	Webhook validation failed due to the controller not being ready.
+________________________________________
+5. Root Cause Analysis
+1.	Deprecated annotation: kubernetes.io/ingress.class should now be replaced with spec.ingressClassName.
+2.	Admission webhook for NGINX Ingress (ingress-nginx-controller-admission) was unreachable immediately after pod restart.
+3.	Timing issue: Controller pod Running does not guarantee webhook readiness.
+________________________________________
+6. Solution
+a. Corrected YAML
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-frontend-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-backend-service
+                port:
+                  number: 8080
+b. Deployment Steps
+1.	Ensure NGINX Ingress Controller pods are running and ready:
+2.	kubectl get pods -n ingress-nginx
+3.	Apply ingress YAML, bypassing webhook validation temporarily:
+4.	kubectl apply --validate=false -f myapp-ingress.yaml
+5.	Verify ingress is deployed:
+kubectl get ingress -n <namespace>
+
+
+
+------------------------------------------------------------------------------
+commands:
+helm uninstall ingress-nginx -n ingress-nginx
+kubectl get validatingwebhookconfiguration
+kubectl delete validatingwebhookconfiguration ingress-nginx-admission
+kubectl delete pod -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx
+kubectl get pods -n ingress-nginx -w
