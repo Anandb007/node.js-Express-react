@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp-frontend
+  template:
+    metadata:
+      labels:
+        app: myapp-frontend
+    spec:
+      containers:
+        - name: myapp-frontend
+          image: 486408064722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application:frontend-latest
+          ports:
+            - containerPort: 80
+      imagePullSecrets:
+        - name: ecr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-frontend-service
+spec:
+  selector:
+    app: myapp-frontend
+  type: ClusterIP  # Keep ClusterIP type
+  ports:
+    - port: 80
+      targetPort: 80
