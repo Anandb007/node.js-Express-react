@@ -1,0 +1,229 @@
+# ☸️ Kubernetes Learning Roadmap — Beginner to Advanced
+
+This roadmap is designed to take you from **zero to production-ready Kubernetes engineer**.  
+It covers all the key concepts, organized by level — Beginner → Intermediate → Advanced → Expert.
+
+---
+## 🧭 Phase 1: Beginner — Core Foundations
+
+### 🎯 Goal:
+Understand what Kubernetes is, its core concepts, and how to interact with a cluster.
+
+### 🧱 Topics:
+- **Container Basics**
+  - What are containers?
+  - Docker fundamentals (images, containers, Dockerfile, registries)
+  - Container orchestration overview
+- **Kubernetes Overview**
+  - What is Kubernetes and why it’s needed
+  - Kubernetes architecture (Control Plane vs Worker Nodes)
+  - Key components:
+    - API Server
+    - Controller Manager
+    - Scheduler
+    - etcd
+    - Kubelet
+    - Kube Proxy
+- **Kubernetes Objects**
+  - Pods
+  - ReplicaSets
+  - Deployments
+  - Services (ClusterIP, NodePort, LoadBalancer)
+- **Basic Commands**
+  - `kubectl get`, `kubectl describe`, `kubectl apply`, `kubectl delete`
+- **Configuration Files**
+  - YAML basics
+  - Writing your first Pod and Deployment manifests
+- **Namespaces & Contexts**
+  - Working with multiple environments
+
+### 🧪 Hands-On Practice:
+- Install Kubernetes (Minikube, kind, or Docker Desktop)
+- Deploy a simple NGINX or web app
+- Expose it via a Service
+
+---
+
+## ⚙️ Phase 2: Intermediate — Application Deployment & Scaling
+
+### 🎯 Goal:
+Learn how to deploy, scale, and manage workloads effectively.
+
+### 📘 Topics:
+- **Controllers**
+  - ReplicaSets
+  - Deployments
+  - DaemonSets
+  - StatefulSets
+  - Jobs & CronJobs
+- **Rolling Updates**
+  - `maxSurge`, `maxUnavailable`
+  - Rollback strategies
+- **Config & Secrets**
+  - ConfigMaps
+  - Secrets
+- **Ingress & Networking**
+  - Ingress Controller (Nginx or Traefik)
+  - Ingress rules, paths, TLS
+  - Cluster networking basics (CNI, kube-proxy)
+- **Resource Management**
+  - Requests and Limits
+  - ResourceQuota, LimitRange
+- **Health Checks**
+  - Liveness, Readiness, Startup probes
+- **Pod Disruption Budgets (PDB)**
+- **Horizontal & Vertical Pod Autoscalers (HPA / VPA)**
+
+### 🧪 Hands-On Practice:
+- Deploy an app with environment variables from ConfigMaps
+- Use HPA to scale based on CPU usage
+- Configure an Ingress to route to multiple services
+
+---
+
+## 🔐 Phase 3: Advanced — Cluster Operations & Security
+
+### 🎯 Goal:
+Understand how clusters are managed and secured in production.
+
+### ⚡ Topics:
+#### 🔸 Scheduling & Node Management
+- NodeSelector, Affinity & Anti-Affinity
+- Taints and Tolerations
+- Pod Priority & Preemption
+- Custom Schedulers
+
+#### 🔸 Storage
+- Persistent Volumes (PVs)
+- Persistent Volume Claims (PVCs)
+- StorageClasses (Dynamic provisioning)
+- Volume modes and AccessModes
+- CSI Drivers (Container Storage Interface)
+
+#### 🔸 Security
+- RBAC (Roles, ClusterRoles, RoleBindings)
+- Service Accounts
+- Admission Controllers & Webhooks
+- Pod Security Standards (baseline, restricted)
+- Network Policies
+- Image security (scanning, private registries)
+- Secrets management (Sealed Secrets / External Secrets)
+- Least privilege principles
+
+#### 🔸 Cluster Management
+- Setting up clusters (kubeadm, kind, minikube, EKS/GKE/AKS)
+- Control plane internals
+- etcd backup and restore
+- Upgrades & maintenance
+- Backup and disaster recovery strategies
+
+---
+
+## 📊 Phase 4: Observability, CI/CD & Performance
+
+### 🎯 Goal:
+Build production-grade systems with proper monitoring, logging, and deployment automation.
+
+### 📈 Observability
+- Metrics Server
+- Prometheus + Grafana
+- Fluentd / Loki / ELK for logging
+- OpenTelemetry / Jaeger for tracing
+- Debugging tools (`kubectl exec`, `kubectl debug`, `kubectl logs`)
+
+### 🧰 CI/CD & Packaging
+- Helm charts (templating, values, best practices)
+- Kustomize
+- GitOps (Argo CD / Flux)
+- Integrating CI/CD (Jenkins, GitHub Actions, Tekton)
+- Canary & Blue-Green Deployments
+
+### 🧮 Scaling & Performance
+- Cluster Autoscaler
+- Custom Metrics Adapter
+- Load testing
+- Resource tuning & optimization
+- Bottleneck analysis
+
+---
+
+## ☁️ Phase 5: Cloud-Native Ecosystem & Extensions
+
+### 🎯 Goal:
+Expand beyond Kubernetes basics into the wider Cloud Native ecosystem.
+
+### 🌐 Topics:
+- Service Mesh (Istio, Linkerd)
+- Serverless on Kubernetes (Knative)
+- Operators & CRDs (Custom Resource Definitions)
+- Policy Enforcement (OPA Gatekeeper, Kyverno)
+- Multi-cluster management (KubeFed, Rancher)
+- Backup & DR tools (Velero)
+- Advanced networking (Cilium, Calico)
+- Multi-tenancy strategies
+
+---
+
+## 🧙‍♂️ Phase 6: Expert / Production-Level Topics
+
+### 🎯 Goal:
+Operate Kubernetes like a pro in real-world environments.
+
+### 🧩 Topics:
+- Kubernetes API internals
+- Writing Custom Controllers & Operators
+- Extending Kubernetes with CRDs
+- Advanced troubleshooting
+- Kubernetes performance tuning
+- Multi-tenant design & cost optimization
+- Security auditing & compliance (CIS benchmarks)
+
+---
+
+## 🗓️ Suggested 3-Month Learning Path
+
+| Month | Focus Area | Key Topics |
+|-------|-------------|------------|
+| 1 | **Foundations + Intermediate** | Pods, Deployments, Services, Ingress, ConfigMaps, Secrets |
+| 2 | **Advanced Cluster Ops + Security** | Scheduling, Storage, RBAC, Network Policies, HPA/VPA |
+| 3 | **Observability + GitOps + Ecosystem** | Prometheus, Helm, ArgoCD, Operators, Service Mesh |
+
+---
+
+## 📚 Recommended Resources
+
+### 📖 Books
+- *Kubernetes in Action* – Marko Lukša  
+- *The Kubernetes Book* – Nigel Poulton  
+- *Kubernetes Patterns* – Bilgin Ibryam & Roland Huß
+
+### 🎓 Courses / Labs
+- [Kubernetes Official Documentation](https://kubernetes.io/docs/)
+- [KodeKloud Kubernetes Labs](https://kodekloud.com)
+- [Play with Kubernetes (Labs)](https://labs.play-with-k8s.com/)
+- [Katacoda Kubernetes Scenarios](https://www.katacoda.com/)
+- [Civo Academy](https://www.civo.com/learn)
+
+### 🎥 YouTube Channels
+- TechWorld with Nana  
+- Learn Kubernetes (Official)  
+- CNCF / KubeCon Talks  
+
+### 🧑‍💻 Certifications
+- **CKA** – Certified Kubernetes Administrator  
+- **CKAD** – Certified Kubernetes Application Developer  
+- **CKS** – Certified Kubernetes Security Specialist  
+
+---
+
+## ✅ Final Goal
+
+By following this roadmap, you’ll progress from:
+> *"I can deploy a pod"*  
+to  
+> *"I can design, secure, and operate production-grade Kubernetes clusters."*
+
+---
+
+**Happy Learning! ☸️**  
+> _“Kubernetes is simple — once you understand how complex it is.”_ 😄
