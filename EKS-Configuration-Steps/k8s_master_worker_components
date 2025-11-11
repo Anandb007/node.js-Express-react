@@ -1,0 +1,247 @@
+# Kubernetes Components: Detailed Guide
+
+This document provides a detailed explanation of Kubernetes components, their roles, and how they interact in a cluster. It covers **Master node components**, **Worker node components**, and their workflows.
+
+---
+
+                                                                                    # Kubernetes Cluster Architecture
+                                                                        
+                                                                                         ┌───────────────────────┐
+                                                                                         │       User / CLI      │
+                                                                                         │  (kubectl / Dashboard)│
+                                                                                         └────────────┬──────────┘
+                                                                                                      │
+                                                                                                      ▼
+                                                                                         ┌───────────────────────┐
+                                                                                         │      API Server       │
+                                                                                         │   (Master Node)       │
+                                                                                         └────────────┬──────────┘
+                                                                                                      │
+                                                                                ┌─────────────┬───────┴─────────────┬─────────────┐
+                                                                                ▼             ▼                     ▼             ▼
+                                                                         ┌────────────┐ ┌──────────────┐     ┌────────────┐ ┌───────────┐
+                                                                         │ Scheduler  │ │ Controller   │     │  etcd      │ │ Admission │
+                                                                         │            │ │ Manager      │     │ (Store)    │ │ Controllers│
+                                                                         └─────┬──────┘ └─────┬────────┘     └─────┬──────┘ └───────────┘
+                                                                               │              │                   │
+                                                                               │              │                   │
+                                                                               └──────┬───────┴───────────────────┘
+                                                                                      │
+                                                                                      ▼
+                                                                                ┌───────────────────┐
+                                                                                │   Worker Nodes    │
+                                                                                │  (Node 1, Node 2) │
+                                                                                └─────────┬─────────┘
+                                                                                          │
+                                                                            ┌─────────────┴─────────────┐
+                                                                            │                           │
+                                                                            ▼                           ▼
+                                                                        ┌───────────┐              ┌───────────┐
+                                                                        │  Kubelet  │              │ Kube-proxy│
+                                                                        │ (Pod Mgmt)│              │ (Networking) │
+                                                                        └─────┬─────┘              └─────┬─────┘
+                                                                              │                          │
+                                                                              ▼                          ▼
+                                                                        ┌─────────────┐            ┌─────────────┐
+                                                                        │    Pods     │            │  Services   │
+                                                                        │ (Containers)│            │  Endpoints  │
+                                                                        └─────────────┘            └─────────────┘
+
+
+
+
+## Table of Contents
+
+1. [Master Node Components](#master-node-components)
+   - [API Server](#api-server)
+   - [Controller Manager](#controller-manager)
+   - [Scheduler](#scheduler)
+   - [etcd](#etcd)
+2. [Worker Node Components](#worker-node-components)
+   - [Kubelet](#kubelet)
+   - [Kube-proxy](#kube-proxy)
+3. [Cluster Workflow](#cluster-workflow)
+4. [Analogies](#analogies)
+
+---
+
+## Master Node Components
+
+### 1. API Server
+
+**Role:** The API Server (`kube-apiserver`) is the **central management component** and the **“front door”** of the cluster. All operations in Kubernetes go through it.
+
+**Responsibilities:**
+
+- Serving REST API requests (`kubectl`, dashboards, controllers)
+- Authentication and Authorization
+- Validation and Admission Control
+- Persisting cluster state to `etcd`
+- Exposing cluster resources
+- Acting as a coordinator for controllers and schedulers
+
+**Workflow:**
+
+1. User runs `kubectl apply -f deployment.yaml`
+2. `kubectl` sends REST POST request to API server
+3. API server validates, passes through admission controllers, and stores in `etcd`
+4. Scheduler assigns pods to nodes
+5. Kubelet starts pods
+6. Status is reported back to API server and updated in `etcd`
+
+**Key Points:**
+
+- Single entry point for the cluster
+- Stateless (data lives in `etcd`)
+- Supports watch & notify for cluster changes
+- Exposes REST API for communication
+
+---
+
+### 2. Controller Manager
+
+**Role:** Ensures that the **cluster state matches the desired state**. It runs multiple **controllers**, each as a control loop.
+
+**Key Controllers:**
+
+- Node Controller – Monitors node health
+- Replication Controller – Maintains desired pod replicas
+- Endpoints Controller – Updates Service endpoints
+- Job Controller – Ensures batch jobs complete successfully
+- Service Account & Token Controller – Manages default service accounts
+
+**Workflow:**
+
+1. Desired state is stored in API server (e.g., Deployment with 3 replicas)
+2. Controller Manager watches API server resources
+3. Controllers compare current vs desired state
+4. Actions are taken to reconcile differences
+5. Changes are updated in API server (and stored in etcd)
+
+**Key Points:**
+
+- Ensures cluster is self-healing
+- Watches resources via API server
+- Works with Scheduler and Kubelet for execution
+
+---
+
+### 3. Scheduler
+
+**Role:** Assigns **newly created pods** to nodes based on resources, constraints, and policies.  
+
+**Workflow:**
+
+1. Pod created (without `nodeName`) in API server
+2. Scheduler watches unscheduled pods
+3. Filters nodes based on:
+   - Resource availability
+   - Node selectors/labels
+   - Taints and tolerations
+   - Affinity / Anti-affinity rules
+4. Scores feasible nodes
+5. Binds pod to the node (`nodeName`)
+6. Kubelet on assigned node starts the pod
+
+**Key Points:**
+
+- Only decides **where pods should run**
+- Works via API server (does not directly manage pods)
+- Ensures pods are assigned efficiently across nodes
+
+---
+
+### 4. etcd
+
+**Role:** **Distributed key-value store** that acts as the **source of truth** for Kubernetes. Stores all cluster state.
+
+**Characteristics:**
+
+- Distributed and highly available
+- Strongly consistent (Raft consensus algorithm)
+- Persistent (survives restarts)
+- Stores data as key-value pairs (e.g., pod specs, services, secrets)
+
+**Workflow:**
+
+- API Server reads/writes etcd
+- Controllers and Scheduler watch API server (not etcd directly)
+- Cluster recovery relies on etcd
+
+**Key Points:**
+
+- All cluster state stored here
+- Only API server interacts directly
+- Enables self-healing and reconciliation
+- Losing etcd = losing cluster state
+
+---
+
+## Worker Node Components
+
+### 1. Kubelet
+
+**Role:** Agent running on each worker node. Ensures pods are running as per **PodSpec** from API server.
+
+**Responsibilities:**
+
+- Watches API server for pods assigned to its node
+- Starts containers via container runtime (Docker, containerd)
+- Monitors pod and container health
+- Reports node and pod status back to API server
+
+**Key Points:**
+
+- Works on each worker node
+- Enforces the desired state locally
+- Communicates with API server to sync pod states
+
+---
+
+### 2. Kube-proxy
+
+**Role:** Handles networking for pods, services, and load balancing across the cluster.
+
+**Responsibilities:**
+
+- Maintains network rules on nodes
+- Ensures traffic can reach the correct pod endpoints
+- Supports service discovery and communication between pods
+
+**How it works:**
+
+- Works with **CNI plugins** or Linux bridges for pod networking
+- Routes incoming traffic to the correct pod based on Service definitions
+- Performs load balancing across pods in a Service
+---
+
+## Cluster Workflow (Master ↔ Worker)
+1. User runs `kubectl apply -f deployment.yaml`
+2. API server stores deployment in `etcd`
+3. Scheduler assigns pods to nodes
+4. Kubelet on each node starts pods using container runtime
+5. Controller Manager ensures desired state (replicas, jobs, endpoints) is maintained
+6. Kube-proxy handles networking and service routing
+7. kubelet reports status back to API server
+8. Cluster continuously reconciles actual vs desired state
+---
+
+## Analogies
+| Component | Analogy |
+|-----------|---------|
+| API Server | Receptionist – receives requests, validates, and forwards them |
+| Controller Manager | Caretaker – ensures cluster matches desired state |
+| Scheduler | Placement manager – decides where each pod should go |
+| etcd | Memory of the brain – stores all cluster state |
+| Kubelet | Warehouse worker – executes tasks on node based on instructions |
+| Kube-proxy | Traffic officer – routes network traffic to the right pod |
+---
+
+## Summary
+- **Master Node Components:** API Server, Controller Manager, Scheduler, etcd
+- **Worker Node Components:** Kubelet, Kube-proxy
+- **Workflow:** User → API Server → Scheduler → Kubelet → Pod → Status back to API Server
+- **Self-Healing:** Achieved through Controller Manager + Scheduler + Kubelet + etcd
+- **Networking:** Managed via Kube-proxy and CNI plugins
+---
+
