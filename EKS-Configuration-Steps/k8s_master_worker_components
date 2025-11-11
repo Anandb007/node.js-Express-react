@@ -63,185 +63,465 @@ This document provides a detailed explanation of Kubernetes components, their ro
 3. [Cluster Workflow](#cluster-workflow)
 4. [Analogies](#analogies)
 
----
+_________________________________________________
+What is the Kubernetes API Server?
+•	The API Server (kube-apiserver) is the central management component of Kubernetes.
+•	It acts as the “front door” for all interactions with the cluster.
+•	Every operation in Kubernetes—creating pods, services, deployments, or querying cluster state—goes through the API server.
+•	It exposes the Kubernetes API over HTTPS, which is how kubectl, controllers, kubelets, and other components communicate.
+Think of it as the brain’s communication hub.
+________________________________________
+Key Responsibilities of API Server
+1.	Serving REST API Requests
+    o	All components (kubectl, controllers, kubelets) communicate via the Kubernetes REST API.
+    o	Example:
+    o	kubectl get pods
+    o	kubectl apply -f deployment.yaml
+These commands are translated into API calls to the API server.
+2.	Authentication and Authorization
+    o	Ensures only valid clients can access or modify cluster resources.
+    o	Supports:
+    	Certificates
+    	Bearer tokens
+    	OAuth
+3.	Validation and Admission Control
+    o	Validates API requests (checks syntax, schemas, and constraints).
+    o	Admission controllers can enforce policies (e.g., limit resource requests, prevent certain pods).
+4.	Persisting Cluster State
+    o	All cluster state is stored in etcd, a highly consistent key-value database.
+    o	API server reads/writes to etcd.
+    o	This makes the API server stateless, as the data is stored in etcd.
+5.	Exposing Cluster Resources
+    o	API server exposes resources like:
+    	Pods, Services, Deployments, StatefulSets
+    	Nodes, ConfigMaps, Secrets
+    o	Other components (kubelet, controller manager, scheduler) watch and modify these resources.
+6.	Acting as a Coordinator
+    o	Ensures that controllers and schedulers can watch the cluster state and act to maintain the desired state.
+________________________________________
+•	API server is stateless; etcd stores all cluster data.
+•	Components like kubelet, controller manager, and scheduler watch resources via the API server.
+________________________________________
+How API Server Interacts with Other Components
+Component	Interaction with API Server
+kubectl / Users	Sends REST API calls (GET, POST, PUT, DELETE) to manage resources.
+kubelet	Watches for pods assigned to its node, reports node & pod status.
+Controller Manager	Watches resources like Deployments, ReplicaSets, Jobs to ensure desired state.
+Scheduler	Watches unassigned pods and updates pod spec in API server with the node assignment.
+etcd	API server reads/writes cluster state to etcd.
+________________________________________
+Example Request Flow via API Server
+    1.	User runs:
+kubectl apply -f deployment.yaml
+    2.	kubectl sends a REST POST request to API server.
+    3.	API server validates the request, passes it through admission controllers, and stores it in etcd.
+    4.	Scheduler sees the new pod spec in etcd and assigns it to a node.
+    5.	kubelet on that node watches API server, sees the pod, and starts the container.
+    6.	kubelet reports status back to API server, which updates etcd.
+________________________________________
+Analogy
+    •	Think of API Server as the receptionist and secretary of a company:
+    o	Receives all requests (emails, forms, calls).
+    o	Checks if the request is valid (authentication & validation).
+    o	Passes the request to the correct department (scheduler, controller, kubelet).
+    o	Keeps a record of everything in the filing system (etcd).
+________________________________________
+Key Points to Remember
+    1.	Single entry point for the cluster – every operation goes through API server.
+    2.	Stateless – actual data lives in etcd.
+    3.	Validates and controls access – handles auth, authz, and admission policies.
+    4.	Supports watch & notify – components can subscribe to changes.
+    5.	Exposes REST API – kubectl, dashboards, and custom controllers all interact through it.
+________________________________________
+ 
+________________________________________
+What is the Kubernetes Scheduler?
+    •	The Kubernetes Scheduler is a master node component.
+    •	Its main job is to assign newly created pods to worker nodes based on resources, constraints, and policies.
+    •	Think of it as the “placement manager” for pods in the cluster.
+Important: The scheduler does not create pods or run containers. It only decides where pods should run.
+________________________________________
+Key Responsibilities of the Scheduler
+1.	Select a node for a pod
+    o	Scheduler looks at unscheduled pods (pods that don’t have a nodeName yet).
+    o	Picks the best node based on available resources, constraints, and policies.
+2.	Check scheduling constraints
+    o	Resource requests: CPU, memory, GPU.
+    o	Node selectors & labels: e.g., only nodes with zone=us-east-1a.
+    o	Taints and tolerations: avoid scheduling pods on nodes with certain taints unless they tolerate them.
+    o	Affinity / anti-affinity rules: e.g., co-locate pods or keep them apart.
+3.	Rank nodes
+    o	After filtering feasible nodes, scheduler scores nodes to find the best fit.
+    o	For example:
+    	Prefer nodes with more free CPU/memory.
+    	Prefer nodes in the same zone for data locality.
+4.	Bind pod to node
+    o	Scheduler writes the chosen nodeName into the pod spec in the API server.
+    o	This signals kubelet on that node to start the pod.
+________________________________________
+Scheduling Workflow Step-by-Step
+Step 1: Pod creation
+    •	A Deployment or user creates a pod (or ReplicaSet creates a pod).
+    •	Pod is created in the API server without a node assignment (nodeName is empty).
+Step 2: Scheduler watches API server
+    •	Scheduler continuously watches for unscheduled pods.
+Step 3: Filter nodes
+    •	Scheduler filters out nodes that cannot run the pod due to:
+    o	Insufficient CPU/memory
+    o	Taints
+    o	NodeSelector/labels
+    o	Pod affinity/anti-affinity
+Step 4: Score nodes
+    •	Scheduler assigns a score to each feasible node.
+    •	Example scoring factors:
+    o	Balanced resource usage
+    o	Data locality
+    o	Custom scheduler policies
+Step 5: Bind pod to node
+    •	Scheduler chooses the node with the highest score.
+    •	Updates pod spec in API server with nodeName=<selected-node>.
+Step 6: kubelet takes over
+    •	kubelet on the assigned node sees the pod in the API server.
+    •	kubelet creates containers according to PodSpec.
+________________________________________
 
-## Master Node Components
+Scheduler Interactions
+Component	Interaction
+API Server	Scheduler watches API server for unscheduled pods and updates pod spec with nodeName.
+kubelet	Once pod is scheduled, kubelet on that node sees the pod and starts it.
+Controller Manager	Works indirectly; controllers like ReplicaSets or Deployments create pods that scheduler assigns.
+________________________________________
+Example Flow
+1.	User runs:
+    kubectl apply -f nginx-deployment.yaml
+2.	API server creates 3 unscheduled pods.
+3.	Scheduler sees these pods, checks cluster nodes:
+    o	Node1: 2 CPU free, 4 GB free
+    o	Node2: 4 CPU free, 8 GB free
+    o	Node3: 1 CPU free, 2 GB free
+4.	Scheduler filters and scores:
+    o	Node2 scores highest → chosen
+5.	Scheduler writes nodeName=Node2 into pod spec.
+6.	kubelet on Node2 sees the pod and starts the container.
+________________________________________
+Analogy
+    •	Think of Scheduler as a human manager in a warehouse:
+    o	Orders arrive (pods need placement)
+    o	Manager checks which shelves (nodes) have enough space and resources
+    o	Assigns each order (pod) to the best shelf (node)
+    o	Warehouse workers (kubelets) then place the items (start containers)
+________________________________________
+Key Points to Remember
+1.	Scheduler only decides where pods run, it does not start containers.
+2.	Scheduler watches for unscheduled pods in the API server.
+3.	Scheduler filters feasible nodes and scores them.
+4.	Scheduler writes the chosen node into the pod spec (nodeName).
+5.	kubelet on that node picks up the pod and starts it.
+________________________________________
+ 
+What is the Controller Manager?
+    •	The Controller Manager is a master node component in Kubernetes.
+    •	Its main responsibility is to ensure that the cluster is in the desired state.
+    •	It does this by running controllers, which are control loops that monitor the cluster and make adjustments automatically.
+    Think of it as the “self-healing brain” of Kubernetes: it watches the cluster and fixes things if they drift from the desired state.
+________________________________________
+Key Responsibilities
+The Controller Manager contains multiple controllers, each responsible for a specific task:
+1.	Node Controller
+    o	Monitors node health.
+    o	Marks nodes as NotReady if they stop reporting.
+    o	Helps in handling pod eviction from dead nodes.
+2.	Replication Controller
+    o	Ensures the desired number of pod replicas are running.
+    o	If a pod crashes, it creates a new one.
+    o	If extra pods exist, it deletes them.
+3.	Endpoints Controller
+    o	Populates endpoints objects for Services.
+    o	Ensures Services know which pods are backing them.
+4.	Service Account & Token Controller
+    o	Creates default service accounts and API access tokens for new namespaces.
+5.	Job Controller
+    o	Ensures that batch jobs complete successfully.
+    o	Monitors Job objects and creates pods as needed.
+6.	Others
+    o	There are more controllers (like DaemonSet, StatefulSet, CronJob), but they all follow the same principle: observe → compare with desired state → fix.
+________________________________________
+How Controller Manager Works
+Step 1: Desired State
+    •	The desired state is stored in the API server (and persisted in etcd).
+    o	Example: Deployment wants 3 replicas of nginx pods.
+Step 2: Controllers watch the cluster
+    •	Controller Manager continuously watches resources in the API server.
+    •	Each controller compares the current state vs the desired state.
+Step 3: Take corrective action
+    •	If the current state does not match the desired state, controllers take action:
+    o	Start new pods (Replication Controller)
+    o	Delete extra pods
+    o	Update endpoints for a Service
+    o	Evict pods from dead nodes (Node Controller)
+Step 4: Update API Server
+    •	Controllers write changes back to the API server, which updates etcd.
+________________________________________
+Controller Manager Interactions
+Component	Interaction
+API Server	Controller Manager watches and updates resources in the API server.
+Scheduler	Scheduler assigns nodes to new pods created by controllers.
+kubelet	Kubelet runs pods on nodes; controllers rely on kubelet to execute pod creation.
+etcd	All cluster state is stored here; Controller Manager reads/writes via API server.
+________________________________________
+Example Workflow
+1.	Deployment created with 3 replicas of nginx.
+2.	Controller Manager’s Replication Controller notices that 0 pods exist.
+3.	Replication Controller creates 3 new pods in the API server.
+4.	Scheduler assigns pods to nodes. 
+5.	kubelet on the nodes starts the containers.
+6.	Controller Manager continuously monitors pods:
+o	If one pod crashes, it automatically creates a new pod to maintain 3 replicas.
+________________________________________
+Analogy
+    •	Think of the Controller Manager as a caretaker for a garden:
+    o	You tell it, “I want 3 roses in this bed.”
+    o	It checks every day:
+    	Are there 3 roses? If one dies, plant a new one.
+    	Are there weeds? Remove them.
+    	Are the roses on the wrong patch? Move them if needed.
+    o	It continuously keeps the garden matching your desired state.
+________________________________________
+Key Points to Remember
+    1.	Controller Manager ensures cluster state matches desired state.
+    2.	It contains multiple controllers (Replication, Node, Endpoints, Jobs, etc.).
+    3.	Controllers watch resources in API server, compare with desired state, and fix differences.
+    4.	Works closely with Scheduler and kubelet to make changes effective.
+    5.	Cluster is self-healing thanks to Controller Manager.
+________________________________________
+ 
+________________________________________
+What is etcd?
+    •	etcd is a distributed key-value database used by Kubernetes.
+    •	It is the source of truth for the entire Kubernetes cluster.
+    •	All cluster state—pods, deployments, services, secrets, configurations—is stored in etcd.
+Think of etcd as the cluster’s memory. Without it, the cluster cannot know what should exist or recover after failures.
+________________________________________
+Key Characteristics of etcd
+1.	Distributed
+    o	Runs as a cluster of 3, 5, or more nodes for high availability.
+    o	Uses the Raft consensus algorithm to maintain consistency across nodes.
+2.	Strongly consistent
+    o	Every read returns the latest value.
+    o	Ensures all nodes in the cluster have the same view of data.
+3.	Key-value store
+    o	Data is stored as key-value pairs.
+    o	Example:
+    o	/registry/pods/default/nginx-pod-1 → {pod spec in JSON}
+    o	/registry/services/default/nginx-svc → {service spec in JSON}
+4.	Persistent
+    o	Data survives restarts if stored on disk.
+    o	Ensures cluster state is durable.
+________________________________________
+How etcd Works in Kubernetes
+1.	API Server reads/writes etcd
+    o	The kube-apiserver is the only component that directly interacts with etcd.
+    o	Example:
+    	User runs kubectl apply -f deployment.yaml.
+    	API server validates and stores the deployment in etcd.
+2.	Controllers and Scheduler watch API server
+    o	Controllers and Scheduler do not talk to etcd directly; they query the API server.
+    o	etcd provides a consistent, up-to-date state that API server serves.
+3.	Cluster recovery
+    o	If a node or master fails, the cluster can reconstruct its state from etcd.
+    o	The desired state in etcd drives the self-healing behavior.
+________________________________________
+Example Storage Flow
+[User / kubectl] 
+       │
+       ▼
+ [API Server]  ←→  [etcd]
+       │
+       ▼
+[Controller Manager / Scheduler / kubelet]
+    •	All resources (pods, services, deployments, configmaps, secrets) are stored in etcd via API server.
+    •	Controllers and schedulers watch the API server to take action.
+    •	kubelets execute actions on nodes based on API server state.
+________________________________________
+Analogy
+    •	Think of etcd as the brain’s memory:
+    o	API server = brain’s cortex (reads/writes memory)
+    o	Controller Manager = muscle commands (checks memory to act)
+    o	Scheduler = placement decisions (based on stored information)
+    o	kubelet = executor (acts according to memory commands)
+Without etcd, the brain forgets the cluster state, and nothing can run reliably.
+________________________________________
+Key Points to Remember
+    1.	etcd stores all cluster state—pods, nodes, services, secrets, configs.
+    2.	Only API server communicates directly with etcd.
+    3.	Distributed and strongly consistent for high availability.
+    4.	Drives desired state reconciliation (self-healing).
+    5.	Cluster recovery depends on etcd; losing etcd = losing the cluster’s memory.
+________________________________________
 
-### 1. API Server
+________________________________________
+Kube-Proxy
+    kube-proxy is a network component that runs on every worker node. Its job is to route traffic to the right pods and handle service load balancing.
+    But to understand kube-proxy properly, we need to understand how Kubernetes networking works first.
+________________________________________
+1. Kubernetes Networking Basics
+Key goals:
+1.	Every pod has its own IP — pods communicate directly without NAT.
+2.	Pods can communicate across nodes.
+3.	Services abstract pod IPs — clients don’t need to know which pod is running where.
+    To achieve this:
+    •	CNI Plugins (Container Network Interface) are used to create pod networking.
+    o	Examples: Calico, Flannel, Weave Net, Cilium
+    •	Linux bridge / veth pairs are used on the node to connect pods to the node network.
+    Network setup on a node:
+    [Pod Network Namespace]
+    veth-pair → [Linux Bridge] → [Host Network] → [kube-proxy / other nodes]
+    •	veth pair: connects pod namespace to the node.
+    •	Linux bridge: node-level switch for pod traffic.
+    •	CNI plugin: sets up routes so pods across nodes can talk.
+________________________________________
+2. kube-proxy Responsibilities
+1.	Service abstraction
+    o	Services in K8s are virtual IPs (ClusterIP).
+    o	kube-proxy ensures traffic to a service IP reaches one of the backing pods.
+2.	Load balancing
+    o	Distributes requests across multiple pods in the service.
+3.	Network rules management
+    o	Creates rules (iptables or IPVS) for traffic routing.
+________________________________________
+3. Modes of kube-proxy
+kube-proxy can operate in different modes:
+Mode	How it works	Notes
+    iptables	Creates iptables rules that match service IP/port → pod IP/port. Linux kernel handles routing.	Efficient for large clusters, most common.
+    IPVS	Uses Linux IP Virtual Server (IPVS) kernel module to route service traffic to pods with more advanced load balancing.	Better for very large clusters.
+    Userspace	Older mode, less used. kube-proxy listens on service port and proxies traffic itself.	Not recommended for production.
+    Most clusters today use iptables or IPVS mode.
+________________________________________
+4. How kube-proxy Works with Pods
+Let’s go step by step.
+Step 1: Pod is created
+•	kubelet creates the pod with CNI plugin:
+    1.	A veth pair is created.
+    2.	Pod gets its own IP in the pod network.
+    3.	Linux bridge or overlay network routes traffic to/from pod.
+Step 2: Service is created
+    •	Service defines a ClusterIP (virtual IP) and a selector (e.g., app=web).
+    •	kube-proxy reads this service info from the API server.
+    •	It also reads the list of pods matching the selector.
+Step 3: kube-proxy sets up routing
+•	In iptables mode:
+    1.	kube-proxy creates iptables rules like:
+    2.	if destination IP = ServiceIP:Port
+    3.	then DNAT to one of the pod IPs:Port
+    4.	Kernel automatically does the NAT and forwards packets.
+•	In IPVS mode:
+o	Creates virtual servers for services and load balances across backend pods.
+Step 4: Handling traffic
+    •	Pod → Pod communication (same node or different node):
+    o	If pods are on the same node: Linux bridge and veth pairs handle it.
+    o	If pods are on different nodes: CNI plugin sets up routes / overlays (VXLAN, BGP, etc.).
+    •	Pod → Service communication:
+    o	kube-proxy intercepts service IP requests.
+    o	Routes request to one of the healthy pods.
+    •	External traffic → Pod via NodePort / LoadBalancer:
+    o	kube-proxy maps NodePort → ClusterIP → pod IP.
+________________________________________
+5. kube-proxy and CNI Interaction
+    •	kube-proxy does NOT handle pod creation or IP allocation.
+    •	CNI plugin does that:
+    o	Creates veth pair, assigns IP, sets up node routes.
+    •	kube-proxy works on top of the pod network:
+    o	Creates rules to map service IP → pod IP
+    o	Uses iptables/IPVS to balance traffic.
+Example:
+    Client → ClusterIP (10.96.0.1:80)
+    iptables rule (kube-proxy) → Pod IP (10.244.1.5:8080)
+    Pod network (CNI + Linux bridge) → Container receives request
+    So kube-proxy bridges the service abstraction with actual pod networking.
+________________________________________
+6. Key Points to Remember
+    1.	kube-proxy is node-local – it runs on every worker node.
+    2.	It monitors the API server for services and endpoints.
+    3.	It updates routing rules (iptables/IPVS) whenever pods are added or removed.
+    4.	CNI handles pod IP allocation & inter-node pod networking, kube-proxy handles service IP → pod IP mapping.
+________________________________________
+7. High-Level Flow Diagram (Textual)
+[Client]
+   |
+   v
+[Service ClusterIP] --- (iptables/IPVS rules by kube-proxy) ---> [Pod IP]
+                                                                 |
+                                                                 v
+                                                         [Container]
+Meanwhile, pod-to-pod communication (without service) goes like:
+[Pod A veth] → [Linux bridge / CNI routes] → [Pod B veth]
+________________________________________
+ 
+________________________________________
+What is kubelet?
+    •	kubelet is an agent that runs on every worker node in a Kubernetes cluster.
+    •	Its main responsibility is to ensure that the containers (inside pods) are running as expected.
+    •	You can think of kubelet as the node-level “supervisor” that talks to the Kubernetes master and makes sure the node is doing what it’s supposed to do.
+________________________________________
+Key Responsibilities of kubelet
+1.	Pod lifecycle management
+    o	Reads pod specifications (PodSpecs) from the API server.
+    o	Makes sure the containers described in the PodSpec are running on the node.
+    o	Handles starting, stopping, and restarting containers as needed.
+2.	Monitoring pod health
+    o	Works with liveness and readiness probes.
+    	Liveness probe: Is the container alive? If not, restart it.
+    	Readiness probe: Is the container ready to accept traffic? If not, remove it from service endpoints.
+    o	Reports status back to the API server.
+3.	Container runtime interaction
+    o	Works with container runtimes (Docker, containerd, CRI-O) to actually start and stop containers.
+    o	Talks via the Container Runtime Interface (CRI).
+4.	Node status reporting
+    o	Reports node health and available resources (CPU, memory, disk) to the master.
+5.	Volume management
+    o	Mounts storage volumes (PVCs) inside pods.
+________________________________________
+How kubelet Works Step-by-Step
+Let’s see the workflow from master → kubelet → pod:
+Step 1: Master schedules a pod
+    •	Master (scheduler) decides which node should run a pod.
+    •	kube-apiserver writes the pod specification to etcd.
+Step 2: kubelet sees the pod
+    •	kubelet runs a watch on the API server for new pods assigned to its node.
+    •	When a new pod appears in the API server for that node, kubelet picks it up.
+Step 3: kubelet talks to container runtime
+    •	kubelet instructs the container runtime to:
+    o	Pull the container image (if not already present)
+    o	Create the container(s)
+    o	Apply networking (via CNI plugin)
+    o	Mount any volumes required
+Step 4: Pod is running
+    •	kubelet ensures the pod stays running.
+    •	It periodically checks container health and restarts containers if needed.
+Step 5: kubelet reports back
+    •	kubelet sends node and pod status back to the API server.
+    •	Controllers use this info to manage scaling, replacement, and load balancing.
+________________________________________
+Interaction with Other Components
+Component	How kubelet interacts
+    API Server	kubelet watches for pods assigned to its node and reports pod status back.
+    Container Runtime	kubelet tells the runtime to start/stop containers. Uses CRI (Container Runtime Interface).
+    CNI Plugins	kubelet ensures pod networking is configured.
+    kube-proxy	Works alongside kubelet to route traffic to pods, but kubelet is responsible for pod lifecycle.
+________________________________________
+Analogy
+Think of kubelet like a floor manager in a restaurant:
+    •	Receives instructions from the head office (master).
+    •	Makes sure chefs (containers) are cooking the dishes (pods) correctly.
+    •	Monitors whether dishes are ready (readiness/liveness probes).
+    •	Reports back to head office about status and any problems.
+________________________________________
+Key Points to Remember
+    1.	kubelet does not schedule pods – it only ensures the pods assigned to its node run correctly.
+    2.	kubelet talks to container runtimes via CRI.
+    3.	kubelet monitors health of pods and containers.
+    4.	kubelet works with CNI plugins to configure pod networking.
+    5.	kubelet reports node and pod status to API server, enabling controllers to maintain desired state.
+________________________________________
 
-**Role:** The API Server (`kube-apiserver`) is the **central management component** and the **“front door”** of the cluster. All operations in Kubernetes go through it.
-
-**Responsibilities:**
-
-- Serving REST API requests (`kubectl`, dashboards, controllers)
-- Authentication and Authorization
-- Validation and Admission Control
-- Persisting cluster state to `etcd`
-- Exposing cluster resources
-- Acting as a coordinator for controllers and schedulers
-
-**Workflow:**
-
-1. User runs `kubectl apply -f deployment.yaml`
-2. `kubectl` sends REST POST request to API server
-3. API server validates, passes through admission controllers, and stores in `etcd`
-4. Scheduler assigns pods to nodes
-5. Kubelet starts pods
-6. Status is reported back to API server and updated in `etcd`
-
-**Key Points:**
-
-- Single entry point for the cluster
-- Stateless (data lives in `etcd`)
-- Supports watch & notify for cluster changes
-- Exposes REST API for communication
-
----
-
-### 2. Controller Manager
-
-**Role:** Ensures that the **cluster state matches the desired state**. It runs multiple **controllers**, each as a control loop.
-
-**Key Controllers:**
-
-- Node Controller – Monitors node health
-- Replication Controller – Maintains desired pod replicas
-- Endpoints Controller – Updates Service endpoints
-- Job Controller – Ensures batch jobs complete successfully
-- Service Account & Token Controller – Manages default service accounts
-
-**Workflow:**
-
-1. Desired state is stored in API server (e.g., Deployment with 3 replicas)
-2. Controller Manager watches API server resources
-3. Controllers compare current vs desired state
-4. Actions are taken to reconcile differences
-5. Changes are updated in API server (and stored in etcd)
-
-**Key Points:**
-
-- Ensures cluster is self-healing
-- Watches resources via API server
-- Works with Scheduler and Kubelet for execution
-
----
-
-### 3. Scheduler
-
-**Role:** Assigns **newly created pods** to nodes based on resources, constraints, and policies.  
-
-**Workflow:**
-
-1. Pod created (without `nodeName`) in API server
-2. Scheduler watches unscheduled pods
-3. Filters nodes based on:
-   - Resource availability
-   - Node selectors/labels
-   - Taints and tolerations
-   - Affinity / Anti-affinity rules
-4. Scores feasible nodes
-5. Binds pod to the node (`nodeName`)
-6. Kubelet on assigned node starts the pod
-
-**Key Points:**
-
-- Only decides **where pods should run**
-- Works via API server (does not directly manage pods)
-- Ensures pods are assigned efficiently across nodes
-
----
-
-### 4. etcd
-
-**Role:** **Distributed key-value store** that acts as the **source of truth** for Kubernetes. Stores all cluster state.
-
-**Characteristics:**
-
-- Distributed and highly available
-- Strongly consistent (Raft consensus algorithm)
-- Persistent (survives restarts)
-- Stores data as key-value pairs (e.g., pod specs, services, secrets)
-
-**Workflow:**
-
-- API Server reads/writes etcd
-- Controllers and Scheduler watch API server (not etcd directly)
-- Cluster recovery relies on etcd
-
-**Key Points:**
-
-- All cluster state stored here
-- Only API server interacts directly
-- Enables self-healing and reconciliation
-- Losing etcd = losing cluster state
-
----
-
-## Worker Node Components
-
-### 1. Kubelet
-
-**Role:** Agent running on each worker node. Ensures pods are running as per **PodSpec** from API server.
-
-**Responsibilities:**
-
-- Watches API server for pods assigned to its node
-- Starts containers via container runtime (Docker, containerd)
-- Monitors pod and container health
-- Reports node and pod status back to API server
-
-**Key Points:**
-
-- Works on each worker node
-- Enforces the desired state locally
-- Communicates with API server to sync pod states
-
----
-
-### 2. Kube-proxy
-
-**Role:** Handles networking for pods, services, and load balancing across the cluster.
-
-**Responsibilities:**
-
-- Maintains network rules on nodes
-- Ensures traffic can reach the correct pod endpoints
-- Supports service discovery and communication between pods
-
-**How it works:**
-
-- Works with **CNI plugins** or Linux bridges for pod networking
-- Routes incoming traffic to the correct pod based on Service definitions
-- Performs load balancing across pods in a Service
----
-
-## Cluster Workflow (Master ↔ Worker)
-1. User runs `kubectl apply -f deployment.yaml`
-2. API server stores deployment in `etcd`
-3. Scheduler assigns pods to nodes
-4. Kubelet on each node starts pods using container runtime
-5. Controller Manager ensures desired state (replicas, jobs, endpoints) is maintained
-6. Kube-proxy handles networking and service routing
-7. kubelet reports status back to API server
-8. Cluster continuously reconciles actual vs desired state
----
-
-## Analogies
-| Component | Analogy |
-|-----------|---------|
-| API Server | Receptionist – receives requests, validates, and forwards them |
-| Controller Manager | Caretaker – ensures cluster matches desired state |
-| Scheduler | Placement manager – decides where each pod should go |
-| etcd | Memory of the brain – stores all cluster state |
-| Kubelet | Warehouse worker – executes tasks on node based on instructions |
-| Kube-proxy | Traffic officer – routes network traffic to the right pod |
----
-
-## Summary
-- **Master Node Components:** API Server, Controller Manager, Scheduler, etcd
-- **Worker Node Components:** Kubelet, Kube-proxy
-- **Workflow:** User → API Server → Scheduler → Kubelet → Pod → Status back to API Server
-- **Self-Healing:** Achieved through Controller Manager + Scheduler + Kubelet + etcd
-- **Networking:** Managed via Kube-proxy and CNI plugins
----
 
