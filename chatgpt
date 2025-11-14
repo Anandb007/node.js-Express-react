@@ -1,0 +1,247 @@
+cat backend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-backend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: myapp-backend
+  template:
+    metadata:
+      labels:
+        app: myapp-backend
+    spec:
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "myapp"
+          effect: "NoSchedule"
+      containers:
+        - name: myapp-backend
+          image: 486408064722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application:backend-latest
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /api/hello
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/hello
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 3
+      imagePullSecrets:
+        - name: ecr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-backend-service
+spec:
+  selector:
+    app: myapp-backend
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+
+root@master-node:/home/ubuntu/k8s-files# cat frontend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-frontend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: myapp-frontend
+  template:
+    metadata:
+      labels:
+        app: myapp-frontend
+    spec:
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "myapp"
+          effect: "NoSchedule"
+      containers:
+        - name: myapp-frontend
+          image: 486408064722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application:frontend-latest
+          ports:
+            - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 3
+      imagePullSecrets:
+        - name: ecr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-frontend-service
+spec:
+  selector:
+    app: myapp-frontend
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+------------
+ingress.yaml
+------------
+root@master-node:/home/ubuntu/k8s-files# cat myapp-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-frontend-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp-backend-service
+                port:
+                  number: 8080
+
+
+hold it, dont generate anything
+You said:
+name: Auto Tag, Build, Push, and Deploy to ECR
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+jobs:
+  ecr-auto-tag-deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      SOURCE_ECR: 486408064722.dkr.ecr.us-east-1.amazonaws.com/frontend-backend-application
+      TARGET_ECR: 486408064722.dkr.ecr.us-east-1.amazonaws.com/front-back-end-services
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials using OIDC
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: arn:aws:iam::486408064722:role/github-ecr-k8s-automation
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+        docker login --username AWS --password-stdin ${{ env.TARGET_ECR }}
+
+    - name: Determine next frontend tag
+      id: frontend_tag
+      run: |
+        EXISTING_TAGS=$(aws ecr list-images --repository-name front-back-end-services --query 'imageIds[*].imageTag' --output text | tr '\t' '\n' | grep '^frontend-v' || true)
+        if [ -z "$EXISTING_TAGS" ]; then
+          NEXT_TAG="frontend-v1"
+        else
+          MAX=$(echo "$EXISTING_TAGS" | sed 's/frontend-v//' | sort -nr | head -n1)
+          NEXT_NUM=$((MAX + 1))
+          NEXT_TAG="frontend-v$NEXT_NUM"
+        fi
+        echo "NEXT_FRONTEND_TAG=$NEXT_TAG" >> $GITHUB_ENV
+
+    - name: Determine next backend tag
+      id: backend_tag
+      run: |
+        EXISTING_TAGS=$(aws ecr list-images --repository-name front-back-end-services --query 'imageIds[*].imageTag' --output text | tr '\t' '\n' | grep '^backend-v' || true)
+        if [ -z "$EXISTING_TAGS" ]; then
+          NEXT_TAG="backend-v1"
+        else
+          MAX=$(echo "$EXISTING_TAGS" | sed 's/backend-v//' | sort -nr | head -n1)
+          NEXT_NUM=$((MAX + 1))
+          NEXT_TAG="backend-v$NEXT_NUM"
+        fi
+        echo "NEXT_BACKEND_TAG=$NEXT_TAG" >> $GITHUB_ENV
+
+    - name: Pull, tag, and push frontend image
+      run: |
+        docker pull ${{ env.SOURCE_ECR }}:frontend-latest
+        docker tag ${{ env.SOURCE_ECR }}:frontend-latest ${{ env.TARGET_ECR }}:${{ env.NEXT_FRONTEND_TAG }}
+        docker push ${{ env.TARGET_ECR }}:${{ env.NEXT_FRONTEND_TAG }}
+
+    - name: Pull, tag, and push backend image
+      run: |
+        docker pull ${{ env.SOURCE_ECR }}:backend-latest
+        docker tag ${{ env.SOURCE_ECR }}:backend-latest ${{ env.TARGET_ECR }}:${{ env.NEXT_BACKEND_TAG }}
+        docker push ${{ env.TARGET_ECR }}:${{ env.NEXT_BACKEND_TAG }}
+
+    - name: Update Kubernetes manifests with new tags
+      run: |
+        sed -i "s|image: ${{ env.TARGET_ECR }}:frontend-latest|image: ${{ env.TARGET_ECR }}:${{ env.NEXT_FRONTEND_TAG }}|g" k8s-yaml-files/frontend-deployment.yaml
+        sed -i "s|image: ${{ env.TARGET_ECR }}:backend-latest|image: ${{ env.TARGET_ECR }}:${{ env.NEXT_BACKEND_TAG }}|g" k8s-yaml-files/backend-deployment.yaml
+
+    - name: Commit updated manifests
+      run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+        git add k8s-yaml-files/*.yaml
+        git commit -m "Update image tags: frontend=${{ env.NEXT_FRONTEND_TAG }}, backend=${{ env.NEXT_BACKEND_TAG }}" || echo "No changes to commit"
+        git push origin master || echo "Push failed (probably no changes)"
+
+this is github actions script.
+
+hold here, dont generate anything
+You said:
+configured the k8s master and worker node, Helm, ArgoCD and ingress-ingress-controller  on ec2 instance(ubuntu).
+integrated the argoccd with Github. whenever changes done in the yaml files, argocd reflect those changes into the k8s. this was manuall process.
+
+now i have tried with automations, whenever Gitchub actions triggers, Pull the images from the ECR service and make the changes and again push them to the ECR.
+For example: in ECR service already have a image with v1 tag(image:v1). i need to pull the image and build with new tag (example: v2). 
+(Note: 
+condition: while taging with new version, if that version is present in the ECR, build with new tag 
+example: already i have V1 and V2 version tags for the images. while pull the images abd build, it try to build with v2 tag. but v2 already present in the ECR. so i want build with V3 tag (i dont want to make any changes to the v2 version Image))
+
+after that the new images should update into the respective depolyment files, so argocd will dectect the changes and apply it to the k8s services.
+
+this is my requirement so give me the process to do this configuration from the scratch
